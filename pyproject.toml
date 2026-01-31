@@ -1,0 +1,21 @@
+[project]
+name = "ecs"
+version = "0.1.0"
+description = "ECS用"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "opentelemetry-api>=1.32.0",
+    "opentelemetry-exporter-otlp>=1.39.1",
+    "opentelemetry-instrumentation-botocore>=0.60b1",
+    "opentelemetry-instrumentation-requests>=0.60b1",
+    "opentelemetry-propagator-aws-xray>=1.0.2",
+    "opentelemetry-sdk-extension-aws>=2.1.0",
+    "opentelemetry-sdk>=1.32.0",
+    "opentelemetry-semantic-conventions>=0.53b0",
+]
+
+[dependency-groups]
+dev = [
+    "aws-lambda-powertools>=3.24.0",
+]

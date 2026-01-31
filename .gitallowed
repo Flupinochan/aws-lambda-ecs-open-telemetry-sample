@@ -1,0 +1,2 @@
+# Allow AWS official Lambda layer ARN for OpenTelemetry distro
+arn:aws:lambda:[a-z0-9-]+:615299751070:layer:AWSOpenTelemetryDistroPython:[0-9]+
