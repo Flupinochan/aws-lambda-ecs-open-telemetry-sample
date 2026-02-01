@@ -1,13 +1,15 @@
 import datetime
 import json
 import logging
+import os
 import sys
 import time
 from collections.abc import Sequence
 from os import linesep
 
-from opentelemetry import propagate, trace
+from opentelemetry import context, trace
 from opentelemetry._logs import set_logger_provider
+from opentelemetry.baggage.propagation import W3CBaggagePropagator
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.propagators.aws import AwsXRayPropagator
 from opentelemetry.sdk._logs import (
@@ -31,6 +33,13 @@ from opentelemetry.sdk.trace.export import (
 )
 
 # tracer
+X_AMZN_TRACE_ID = os.environ.get("X_AMZN_TRACE_ID", "")
+headers = {"X-Amzn-Trace-Id": X_AMZN_TRACE_ID} if X_AMZN_TRACE_ID else {}
+print(f"TRACE_ID: {headers}")
+ctx = AwsXRayPropagator().extract(carrier=headers)
+ctx2 = W3CBaggagePropagator().extract(carrier=headers, context=ctx)
+context.attach(ctx2)
+
 ecs_resource = get_aggregated_resources([AwsEcsResourceDetector()])
 service_resource = Resource.create(
     {
@@ -39,7 +48,7 @@ service_resource = Resource.create(
     },
 )
 merged_resource = ecs_resource.merge(service_resource)
-provider = TracerProvider(
+trace_provider = TracerProvider(
     id_generator=AwsXRayIdGenerator(),
     resource=merged_resource,
 )
@@ -47,9 +56,9 @@ provider = TracerProvider(
 ## config/ecs/ecs-default-config.yaml
 otlp_exporter = OTLPSpanExporter(endpoint="http://localhost:4318/v1/traces")
 span_processor = BatchSpanProcessor(otlp_exporter)
-provider.add_span_processor(span_processor)
-trace.set_tracer_provider(provider)
-propagate.set_global_textmap(AwsXRayPropagator())
+trace_provider.add_span_processor(span_processor)
+trace.set_tracer_provider(trace_provider)
+# propagate.set_global_textmap(AwsXRayPropagator())
 tracer = trace.get_tracer("my.tracer.name")
 
 
@@ -98,12 +107,12 @@ class CustomLogRecordExporter(LogRecordExporter):
         pass
 
 
-provider = LoggerProvider(resource=service_resource)
+logger_provider = LoggerProvider(resource=service_resource)
 # 標準のログFormatであるConsoleLogRecordExporterを利用することも可能
-processor = BatchLogRecordProcessor(CustomLogRecordExporter())
-provider.add_log_record_processor(processor)
-set_logger_provider(provider)
-handler = LoggingHandler(level=logging.INFO, logger_provider=provider)
+logger_processor = BatchLogRecordProcessor(CustomLogRecordExporter())
+logger_provider.add_log_record_processor(logger_processor)
+set_logger_provider(logger_provider)
+handler = LoggingHandler(level=logging.INFO, logger_provider=logger_provider)
 # bodyキーに出力される内容をmessageのみにする
 # OpenTelemetryのloggerにはTracesとMetricsとは異なり、
 # Logs API(.infoや.error)がないため普通にloggingの仕組みを使う
@@ -143,7 +152,8 @@ def run_pipeline() -> None:
     step3()
 
 
-@tracer.start_as_current_span("main")
+# SpanKind.SERVERを指定
+@tracer.start_as_current_span("main", kind=trace.SpanKind.SERVER)
 def main():
     """Main function."""
     trace_id = trace.get_current_span().get_span_context().trace_id
@@ -154,3 +164,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    trace_provider.shutdown()
+    logger_provider.shutdown()

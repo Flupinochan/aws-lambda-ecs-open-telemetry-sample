@@ -2,33 +2,40 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as cdk from "aws-cdk-lib/core";
 import { Construct } from "constructs";
 import path from "path";
 
 export class OtelEcsSampleStack extends cdk.Stack {
+  public readonly cluster: ecs.Cluster;
+  public readonly taskDefinition: ecs.FargateTaskDefinition;
+  public readonly ecsVpc: ec2.Vpc;
+  public readonly ecsSecurityGroup: ec2.SecurityGroup;
+  public readonly container: ecs.ContainerDefinition;
+
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
     // VPC
-    const vpc = new ec2.Vpc(this, "SampleVpc", {
+    this.ecsVpc = new ec2.Vpc(this, "SampleVpc", {
       maxAzs: 2,
     });
 
     // ECSタスク用セキュリティグループ
-    const ecsSecurityGroup = new ec2.SecurityGroup(
+    this.ecsSecurityGroup = new ec2.SecurityGroup(
       this,
       "EcsTaskSecurityGroup",
       {
-        vpc,
+        vpc: this.ecsVpc,
         description: "Allow all outbound traffic for ECS tasks",
         allowAllOutbound: true,
       },
     );
 
     // ECS Cluster
-    const cluster = new ecs.Cluster(this, "SampleCluster", {
-      vpc,
+    this.cluster = new ecs.Cluster(this, "SampleCluster", {
+      vpc: this.ecsVpc,
     });
 
     const taskRole = new iam.Role(this, "TaskRole", {
@@ -62,7 +69,7 @@ export class OtelEcsSampleStack extends cdk.Stack {
     });
 
     // Fargate Task Definition
-    const taskDef = new ecs.FargateTaskDefinition(this, "OtelTaskDef", {
+    this.taskDefinition = new ecs.FargateTaskDefinition(this, "OtelTaskDef", {
       cpu: 1024,
       memoryLimitMiB: 3072,
       taskRole,
@@ -70,20 +77,23 @@ export class OtelEcsSampleStack extends cdk.Stack {
     });
 
     // aws-otel-collector コンテナ
-    const collectorContainer = taskDef.addContainer("aws-otel-collector", {
-      image: ecs.ContainerImage.fromRegistry(
-        "public.ecr.aws/aws-observability/aws-otel-collector:latest",
-      ),
-      essential: true,
-      command: ["--config=/etc/ecs/ecs-default-config.yaml"],
-      logging: ecs.LogDrivers.awsLogs({
-        streamPrefix: "ecs",
-        logGroup: collectorLogGroup,
-      }),
-    });
+    const collectorContainer = this.taskDefinition.addContainer(
+      "aws-otel-collector",
+      {
+        image: ecs.ContainerImage.fromRegistry(
+          "public.ecr.aws/aws-observability/aws-otel-collector:latest",
+        ),
+        essential: true,
+        command: ["--config=/etc/ecs/ecs-default-config.yaml"],
+        logging: ecs.LogDrivers.awsLogs({
+          streamPrefix: "ecs",
+          logGroup: collectorLogGroup,
+        }),
+      },
+    );
 
     // アプリケーションコンテナ
-    const emitterContainer = taskDef.addContainer("app", {
+    this.container = this.taskDefinition.addContainer("app", {
       image: ecs.ContainerImage.fromAsset(path.join(__dirname, "..", ".."), {
         file: "services/ecs/Dockerfile",
       }),
@@ -92,9 +102,14 @@ export class OtelEcsSampleStack extends cdk.Stack {
         logGroup: emitterLogGroup,
       }),
     });
-    emitterContainer.addContainerDependencies({
+    this.container.addContainerDependencies({
       container: collectorContainer,
       condition: ecs.ContainerDependencyCondition.START,
+    });
+
+    new ssm.StringParameter(this, "TaskDefArnParam", {
+      parameterName: `/otel/${cdk.Stack.of(this).stackName}/task-definition-arn`,
+      stringValue: this.taskDefinition.taskDefinitionArn,
     });
   }
 }

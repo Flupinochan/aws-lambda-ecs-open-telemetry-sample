@@ -6,6 +6,8 @@ import { Construct } from "constructs";
 import path from "path";
 
 export class PowertoolsOtelLambdaSampleStack extends cdk.Stack {
+  public readonly lambdaFunction: lambda.Function;
+
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
@@ -39,7 +41,7 @@ export class PowertoolsOtelLambdaSampleStack extends cdk.Stack {
       retention: logs.RetentionDays.ONE_DAY,
     });
 
-    const fn = new lambda.Function(this, "MyFunction", {
+    this.lambdaFunction = new lambda.Function(this, "MyFunction", {
       functionName: `${cdk.Stack.of(this).stackName}-function`,
       runtime: lambda.Runtime.PYTHON_3_13,
       handler: "app.lambda_handler",
